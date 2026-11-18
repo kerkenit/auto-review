@@ -1,1 +1,143 @@
 # auto-review
+Docker file for https://github.com/jwilger/auto_review
+#### **`docker-compose.yml`**
+```yaml 
+services:
+  auto_review:
+    image: ghcr.io/kerkenit/auto-review:latest
+    container_name: auto_review
+    restart: unless-stopped
+    environment:
+
+      # Forgejo instance the bot reviews PRs on.
+      - FORGEJO_BASE_URL=https://forgejo.domain.com
+
+      # Gateway bot PAT (mint with `auto-review auth init`). Scopes:
+      # write:repository, write:issue, read:user.
+      - AR_FORGEJO_TOKEN=09672a83f82ab457466cf5456c56ae4a51c8e717
+
+      # Webhook HMAC shared secret. Generate with:
+      #   openssl rand -hex 32
+      - WEBHOOK_SECRET=ec470ef9d3a26c1730dae443b8de4d6016bf6f14ae54b7f34ff960271bcd7ed8
+
+      # OpenAI-compatible LLM endpoint. For local Ollama:
+      #   http://127.0.0.1:11434
+      - LLM_BASE_URL=http://127.0.0.1:11434
+
+      # Required ----------------------------------------------------
+
+      # Optional ----------------------------------------------------
+
+      # Direct systemd/bare-host deployments must explicitly opt out of the embedded
+      # OCI gateway launcher. AR_GATEWAY_BARE=true means the service runs with
+      # application-level controls plus systemd hardening only; it is not
+      # container-equivalent isolation. Prefer the packaged binary's embedded OCI
+      # launcher when your host supports it.
+      # - AR_GATEWAY_BARE=true
+
+      # - LLM_API_KEY=
+      # - LLM_REASONING_MODEL=qwen2.5-coder:32b
+      # - LLM_CHEAP_MODEL=qwen2.5-coder:7b
+      # - LLM_EMBEDDING_MODEL=bge-m3:latest
+
+      # Embedding-pass tuning. Defaults are sized for small local
+      # Ollama embedders (e.g. nomic-embed-text at num_ctx=2048,
+      # ~8 KiB English): per-snippet cap 6 KiB, batch 32. Operators
+      # pointing at hosted OpenAI-class embedders should raise the
+      # cap (text-embedding-3-* tolerates up to ~32 KiB per input).
+      # - AR_EMBED_INPUT_CAP_BYTES=6144
+      # - AR_EMBED_BATCH_SIZE=32
+
+      # Optional Ollama options.num_ctx for /v1/embeddings. When set,
+      # the embedding client passes `options: {num_ctx: N}` on every
+      # embed POST so a raised input cap isn't silently truncated by
+      # Ollama's default 2048-token window. Hosted OpenAI ignores it.
+      # - AR_EMBED_NUM_CTX=4096
+
+      # Bot identity: defaults to `auto-review`. Override when the
+      # Forgejo bot user is named differently.
+      # - AR_BOT_LOGIN=auto-review
+      # - AR_BOT_NAME=Auto Review Bot
+
+      # Enables POST /reviews/ci for Forgejo Actions jobs that trigger
+      # semantic review after required deterministic CI jobs pass. Generate
+      # independently from WEBHOOK_SECRET (32+ random bytes/chars; short
+      # values fail startup) and provide the same value to the workflow as
+      # its action token.
+      # - AR_CI_REVIEW_TOKEN=4c99d32ed1be832d9b76ec6bb68eb5088832b3292e3be0d5592663025dbc346d
+
+      # Persistent learnings store (SQLite). Unset defaults to a gateway state path;
+      # set `:memory:` only for volatile local evaluation.
+      - AR_LEARNINGS_DB=/data/learnings.db
+
+      # Persistent review-history store (SQLite). Tracks last-reviewed
+      # SHA per PR so the orchestrator's incremental-review dedup
+      # survives restarts. Unset defaults to a gateway state path; set `:memory:` only
+      # for volatile local evaluation.
+      - AR_HISTORY_DB=/data/review_history.db
+
+      # Persistent vector/RAG snippet store (SQLite). Unset defaults to a gateway state
+      # path; set `:memory:` to avoid retaining snippets across restarts.
+      - AR_VECTOR_DB=/data/vector.db
+
+      # Optional LLM cost attribution. AR_PRICE_TABLE_PATH points at a JSON file
+      # whose keys are model names or provider-qualified "<base-url>|<model>" keys
+      # and whose values are USD-per-million-token input/output/embedding prices.
+      # The review history table records per_review_cost_usd for successful reviews.
+      # Set AR_REVIEW_COST_FOOTER=false to keep recording cost without posting the
+      # public "LLM usage and cost" footer on review comments.
+      # - AR_PRICE_TABLE_PATH=/data/prices.json
+      # - AR_REVIEW_COST_FOOTER=true
+
+      # Background-poller cadence for inline-thread mentions
+      # (gitea#26023 workaround). Set to 0 to disable.
+      # - AR_POLL_INTERVAL_SECS=60
+
+      # /readyz cache TTL (seconds). Lower for faster failure
+      # detection, higher to reduce Forgejo load from k8s probes.
+      # - AR_READINESS_TTL_SECS=10
+
+      # The gateway clones and reads PR workspaces but does not execute
+      # repo-controlled linters, tests, builds, or LLM-issued shell commands;
+      # deterministic execution belongs in CI before POST /reviews/ci.
+
+      # Cap on concurrent in-flight reviews. Without this, a burst
+      # of N PRs spawns N tmpdirs + N in-flight LLM calls. Set on
+      # high-traffic instances or expensive cloud LLMs to
+      # rate-limit concurrency rather than instantaneous request
+      # rate. Webhook handler still acks immediately; excess
+      # spawned tasks just wait on the semaphore.
+      # - AR_REVIEW_CONCURRENCY=4
+
+      # Persistent dedup store of recently-seen X-Forgejo-Delivery UUIDs.
+      # When Forgejo retries a delivery (network blip, gateway
+      # restart) the same UUID arrives twice; the store bounces the
+      # second one with 200 OK rather than dispatching a racing
+      # review. Unset defaults to a gateway SQLite state path; set `:memory:` for a
+      # volatile LRU. Default 256 IDs (covers thousands of seconds of typical traffic).
+      # Set capacity to 0 to disable.
+      # - AR_DEDUP_DB=/data/webhook_dedup.db
+      # - AR_DEDUP_CAPACITY=256
+
+      # Severity floor for posted findings. Values: warning (default,
+      # drop note-only nits), note (post everything including the
+      # LLM's scratchpad observations), error (only post Error-severity
+      # findings). The bot still generates dropped findings, but the
+      # floor runs before verifier calls so low-severity drops save
+      # cheap-tier LLM work. Notes are pure noise on the PR page once
+      # review has run; set `note` explicitly if you want them surfaced.
+      # - AR_SEVERITY_FLOOR=warning
+
+      # The binary defaults to 0.0.0.0:8080; this systemd template overrides it to
+      # 127.0.0.1:8080 so a TLS-terminating reverse proxy can sit in front of the
+      # gateway. If you front it with a VIP that does TLS, bind to all interfaces.
+      # - AR_GATEWAY_BIND=0.0.0.0:8080
+
+      # Tracing filter. info,ar_gateway=debug shows webhook intake +
+      # dispatch. Drop to `warn` for quieter ops.
+      # - RUST_LOG=info,ar_gateway=debug
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+```
