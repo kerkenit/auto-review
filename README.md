@@ -68,17 +68,17 @@ services:
 
       # Persistent learnings store (SQLite). Unset defaults to a gateway state path;
       # set `:memory:` only for volatile local evaluation.
-      - AR_LEARNINGS_DB=/data/learnings.db
+      - AR_LEARNINGS_DB=/etc/auto_review/learnings.db
 
       # Persistent review-history store (SQLite). Tracks last-reviewed
       # SHA per PR so the orchestrator's incremental-review dedup
       # survives restarts. Unset defaults to a gateway state path; set `:memory:` only
       # for volatile local evaluation.
-      - AR_HISTORY_DB=/data/review_history.db
+      - AR_HISTORY_DB=/etc/auto_review/review_history.db
 
       # Persistent vector/RAG snippet store (SQLite). Unset defaults to a gateway state
       # path; set `:memory:` to avoid retaining snippets across restarts.
-      - AR_VECTOR_DB=/data/vector.db
+      - AR_VECTOR_DB=/etc/auto_review/vector.db
 
       # Optional LLM cost attribution. AR_PRICE_TABLE_PATH points at a JSON file
       # whose keys are model names or provider-qualified "<base-url>|<model>" keys
@@ -86,7 +86,7 @@ services:
       # The review history table records per_review_cost_usd for successful reviews.
       # Set AR_REVIEW_COST_FOOTER=false to keep recording cost without posting the
       # public "LLM usage and cost" footer on review comments.
-      # - AR_PRICE_TABLE_PATH=/data/prices.json
+      # - AR_PRICE_TABLE_PATH=/etc/auto_review/prices.json
       # - AR_REVIEW_COST_FOOTER=true
 
       # Background-poller cadence for inline-thread mentions
@@ -116,7 +116,7 @@ services:
       # review. Unset defaults to a gateway SQLite state path; set `:memory:` for a
       # volatile LRU. Default 256 IDs (covers thousands of seconds of typical traffic).
       # Set capacity to 0 to disable.
-      # - AR_DEDUP_DB=/data/webhook_dedup.db
+      # - AR_DEDUP_DB=/etc/auto_review/webhook_dedup.db
       # - AR_DEDUP_CAPACITY=256
 
       # Severity floor for posted findings. Values: warning (default,
@@ -139,5 +139,5 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/data
+      - ./data:/etc/auto_review
 ```
